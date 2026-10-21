@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+scripts/_selftest.docx
+# institution logo is not distributed: put your own logo.png in your course folder
+assets/ariel_logo.png

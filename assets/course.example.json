@@ -1,0 +1,18 @@
+{
+  "lab": "מעבדה 2",
+  "faculty": "הפקולטה להנדסה",
+  "department": "המחלקה להנדסת חשמל ואלקטרוניקה",
+  "logo": "logo.png",
+  "students": [
+    {
+      "name": "שם מלא",
+      "id": "000000000",
+      "contact": "050-0000000"
+    }
+  ],
+  "scope_serial": "",
+  "simulator": "Multisim",
+  "booklets_dir": "חוברות",
+  "max_pages_summary": 15,
+  "scope_width_cm": 11
+}

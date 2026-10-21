@@ -1,0 +1,17 @@
+* Circuit 1.1 (prep Q9c) - MC14093 astable with a voltage divider. Booklet figure 1.1.
+* Vdd = 6 V, given Vp = 3 V / Vn = 2 V, Rx = 60k (output -> node X), 100k (X -> GND), C = 10 nF.
+* The Schmitt inverter is modelled by a hysteretic switch: closes (out -> 0) when V(cap) > 3 V,
+* opens (out -> Vdd through the small pull-up) when V(cap) < 2 V.
+* Expected: Vc between 2 V and 3 V, asymptote 3.75 V; T = 0.470 ms (f = 2.13 kHz); first rise 0.60 ms.
+* Pull-up 1 ohm + switch Ron 1 mohm: charge path = R + 1 ohm and low level ~10 mV, so the
+* model adds < 0.1% to the timing (a 100 ohm pull-up had biased f by ~1.6%).
+.title Circuit 1.1 Schmitt astable with divider
+VDD  vdd 0   DC 6
+RPU  vdd out 1
+S1   out 0   cap 0  SWS
+RX   out cap 60k
+R2   cap 0   100k
+C1   cap 0   10n  IC=0
+.model SWS SW(Ron=1m Roff=1e9 Vt=2.5 Vh=0.5)
+.tran 0.5u 2m UIC
+.end

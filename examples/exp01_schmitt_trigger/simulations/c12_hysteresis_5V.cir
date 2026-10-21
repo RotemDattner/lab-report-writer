@@ -1,0 +1,17 @@
+* Circuit 1.2 (procedure part 1) - hysteresis curve, VDD = 5 V. Booklet figure 1.2.
+* MC14093 NAND with both inputs tied = Schmitt inverter; thresholds from the datasheet (typ):
+* Vp = 2.9 V, Vn = 1.9 V  ->  switch Vt = 2.4, Vh = 0.5.
+* Vin: 5 kHz sine, DC offset 2.5 V, amplitude 2.5 V (stays inside 0..VDD), starts at mid-level (start phase does not affect the loop).
+* XY plot: V(in) on X, V(out) on Y. Alternative inputs below (comment/uncomment one VIN line).
+* Pull-up 1 ohm + switch Ron 1 mohm: charge path = R + 1 ohm and low level ~10 mV, so the
+* model adds < 0.1% to the timing (a 100 ohm pull-up had biased f by ~1.6%).
+.title Circuit 1.2 hysteresis VDD=5V
+VDD  vdd 0   DC 5
+VIN  in  0   SIN(2.5 2.5 5k)
+* VIN in 0 PULSE(0 5 0 100u 100u 0 200u)      ; triangle 5 kHz
+* VIN in 0 PULSE(0 5 0 10n 10n 100u 200u)     ; square 5 kHz
+RPU  vdd out 1
+S1   out 0   in 0   SWS
+.model SWS SW(Ron=1m Roff=1e9 Vt=2.4 Vh=0.5)
+.tran 0.2u 0.6m
+.end
