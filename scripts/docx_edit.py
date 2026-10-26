@@ -45,6 +45,24 @@ EMU_PER_CM = 360000
 COMMENT_PARTS = ('comments.xml', 'commentsExtended.xml', 'commentsIds.xml', 'commentsExtensible.xml')
 
 
+def _read_parts(path):
+    """All parts of a .docx. A file open in Word is locked on Windows; it is then read through a
+    shared-read copy (PowerShell Copy-Item), which sees the last version Word saved."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            return {n: z.read(n) for n in z.namelist()}
+    except PermissionError:
+        if os.name != 'nt':
+            raise
+        import tempfile, subprocess
+        tmp = os.path.join(tempfile.mkdtemp(prefix='docx_edit_'), 'locked.docx')
+        subprocess.run(['powershell', '-NoProfile', '-Command',
+                        f"Copy-Item -LiteralPath '{path}' -Destination '{tmp}'"], check=True)
+        print(f'note: {os.path.basename(path)} is open in Word – read the last saved version')
+        with zipfile.ZipFile(tmp) as z:
+            return {n: z.read(n) for n in z.namelist()}
+
+
 def norm(s):
     return ''.join(' ' if c == ' ' else c for c in s if c not in INV)
 
@@ -56,8 +74,7 @@ def text_of(el):
 class Doc:
     def __init__(self, path, backup=True):
         self.path = os.path.abspath(path)
-        with zipfile.ZipFile(self.path) as z:
-            self.parts = {n: z.read(n) for n in z.namelist()}
+        self.parts = _read_parts(self.path)
         self.tree = etree.fromstring(self.parts['word/document.xml'])
         self.body = self.tree.find(q(W, 'body'))
         rels = etree.fromstring(self.parts['word/_rels/document.xml.rels'])
@@ -69,7 +86,10 @@ class Doc:
         os.makedirs(d, exist_ok=True)
         stem = os.path.splitext(os.path.basename(self.path))[0]
         dst = os.path.join(d, f'{stem} - גיבוי {datetime.datetime.now():%Y-%m-%d %H%M}.docx')
-        shutil.copyfile(self.path, dst)
+        with open(dst, 'wb') as f:                        # from what was read: works while Word holds the file
+            with zipfile.ZipFile(f, 'w', zipfile.ZIP_DEFLATED) as z:
+                for n in ['[Content_Types].xml'] + [n for n in self.parts if n != '[Content_Types].xml']:
+                    z.writestr(n, self.parts[n])
         return dst
 
     # ---------------------------------------------------------------- finding

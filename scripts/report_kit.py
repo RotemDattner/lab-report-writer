@@ -64,6 +64,8 @@ def edited_by_hand(docx_path):
     try:
         with zipfile.ZipFile(docx_path) as z:
             return b'w:rsidR' in z.read('word/document.xml')
+    except PermissionError:            # open in Word right now: the user is working on it
+        return True
     except (OSError, KeyError, zipfile.BadZipFile):
         return False
 

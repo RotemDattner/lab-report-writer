@@ -51,7 +51,7 @@ def parse_keysight(path):
     tr = re.search(r'TRIGGER\s*\n.*\n\s*Mode ([^\n]+)', txt)
     if tr:
         info['trigger'] = tr.group(1).strip()
-    for m in re.finditer(r'^([A-Za-z\-]+)\((\d)\), Cur ([^,]+),', txt, re.M):
+    for m in re.finditer(r'^\+?\s*([A-Za-z\-]+)\((\d)\), Cur ([^,]+),', txt, re.M):   # "+ Duty(2)" = cursor-linked
         info['meas'].append((m.group(1), int(m.group(2)), value(m.group(3)), m.group(3).strip()))
     return info
 
