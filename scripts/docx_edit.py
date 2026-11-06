@@ -17,6 +17,7 @@ their edits. Make each requested change directly in the document XML instead:
     d.renumber(fig={6: 5, 7: 6}, tab={4: 2})          # after removing figures/tables: every "איור 7" → "איור 6"
     d.remove_comments()                               # once each of the user's comments is handled
     d.scale_images(11, only=lambda target: 'scope' in target)
+    d.insert_built(d.find_par('…'), lambda r: (r.figure(...), r.table(...)), exp_dir)   # new figure/table
     d.save()                                          # in place; if Word holds the file: "<name> - מעודכן.docx"
 
 Text matching ignores the invisible direction marks (LRM/RLM/WJ) and treats NBSP as a space, so
@@ -173,6 +174,54 @@ class Doc:
 
     def delete(self, el):
         el.getparent().remove(el)
+
+    def insert_built(self, after, build, exp_dir):
+        """Insert content made with report_kit (figures with captions, tables, paragraphs with $math$)
+        after element `after`, in the same styles as the rest of the report. build(r) gets a fresh
+        report_kit.Report, so numbering in it starts at 1: renumber the document first, then build with the
+        numbers the new items should have. Pictures are copied into the document with new relationship ids.
+        Returns the inserted elements."""
+        import tempfile
+        from report_kit import Report
+        r = Report(exp_dir, 'summary')
+        build(r)
+        tmp = os.path.join(tempfile.mkdtemp(prefix='docx_ins_'), 'block.docx')
+        r.b.save(tmp)
+        src = Doc(tmp, backup=False)
+        els = [e for e in src.body if e.tag != q(W, 'sectPr')]
+        RELNS = 'http://schemas.openxmlformats.org/package/2006/relationships'
+        rels = etree.fromstring(self.parts['word/_rels/document.xml.rels'])
+        for blip in [b for e in els for b in e.iter(q(A, 'blip'))]:
+            target = src.rid[blip.get(q(R, 'embed'))]
+            ext = os.path.splitext(target)[1]
+            k = 1
+            while f'word/media/inserted{k}{ext}' in self.parts:
+                k += 1
+            name = f'media/inserted{k}{ext}'
+            self.parts['word/' + name] = src.parts['word/' + target]
+            rid = f'rIdIns{k}'
+            el = etree.SubElement(rels, f'{{{RELNS}}}Relationship')
+            el.set('Id', rid); el.set('Target', name)
+            el.set('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image')
+            blip.set(q(R, 'embed'), rid)
+            self.rid[rid] = name
+        self.parts['word/_rels/document.xml.rels'] = etree.tostring(rels, xml_declaration=True,
+                                                                    encoding='UTF-8', standalone=True)
+        used = {int(x.get('id')) for x in self.body.iter(q(WP, 'docPr')) if (x.get('id') or '').isdigit()}
+        nxt = max(used | {0}) + 1
+        for e in els:                                    # drawing ids must stay unique in the document
+            for dp in list(e.iter(q(WP, 'docPr'))) + list(e.iter('{http://schemas.openxmlformats.org/drawingml/2006/picture}cNvPr')):
+                dp.set('id', str(nxt)); nxt += 1
+        ct = self.parts['[Content_Types].xml'].decode('utf-8')
+        for ext in ('png', 'jpg'):
+            if any(n.endswith('.' + ext) for n in self.parts) and f'Extension="{ext}"' not in ct:
+                mime = 'image/png' if ext == 'png' else 'image/jpeg'
+                ct = ct.replace('<Default ', f'<Default Extension="{ext}" ContentType="{mime}"/><Default ', 1)
+        self.parts['[Content_Types].xml'] = ct.encode('utf-8')
+        for e in els:
+            after.addnext(e)
+            after = e
+        return els
 
     def unhighlight(self, el):
         for h in list(el.iter(q(W, 'highlight'))):

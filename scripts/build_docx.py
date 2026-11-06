@@ -163,9 +163,10 @@ class DocxBuilder:
 
     def _render_tokens(self, content, rtl=True, bold=False, size=None, highlight=False,
                        italic=False, color=None):
-        """content: str, or list of: str | ('math',omml) | ('hl',text) | ('hlmath',omml).
+        """content: str, or list of: str | ('math',omml) | ('hl',text) | ('hlmath',omml) | ('img', path, width_emu).
         'hl' marks a Hebrew segment for yellow highlight (needs-verification); 'math'/'hlmath'
-        emit inline OMML (immune to bidi reordering of relations)."""
+        emit inline OMML (immune to bidi reordering of relations); 'img' is an inline picture
+        (a signature in the declaration table)."""
         if isinstance(content, str):
             content = [content]
         out = []
@@ -174,6 +175,9 @@ class DocxBuilder:
                 kind = item[0]
                 if kind in ('math', 'hlmath'):
                     out.append(omath(item[1]))
+                    continue
+                if kind == 'img':
+                    out.append(self._drawing_run(item[1], exact_w_emu=item[2] if len(item) > 2 else None))
                     continue
                 text, hl = item[1], (kind == 'hl' or highlight)
             else:
@@ -270,7 +274,9 @@ class DocxBuilder:
     def _cell_len(c):
         if isinstance(c, str):
             return len(c)
-        if isinstance(c, tuple):                         # ('math', omml) / ('hl', text)
+        if isinstance(c, tuple):                         # ('math', omml) / ('hl', text) / ('img', path, w)
+            if c[0] == 'img':
+                return 14
             return len(re.sub(r'<[^>]+>', '', c[1])) if c[0] in ('math', 'hlmath') else len(c[1])
         return sum(DocxBuilder._cell_len(x) for x in c)
 
@@ -286,7 +292,8 @@ class DocxBuilder:
         return [max(min_w, int(total * x / sum(w))) for x in w]
 
     # ---- images ----
-    def image(self, path, caption=None, max_w_emu=_MAX_W_EMU, keep_next=False, exact_w_emu=None):
+    def _drawing_run(self, path, max_w_emu=_MAX_W_EMU, exact_w_emu=None):
+        """One picture as an inline run (<w:r><w:drawing>…), usable inside any paragraph or table cell."""
         w_px, h_px = _png_size(path)
         cx = w_px * _EMU_PER_PX
         cy = h_px * _EMU_PER_PX
@@ -298,20 +305,23 @@ class DocxBuilder:
         ext = os.path.splitext(path)[1].lower().replace('.jpeg', '.jpg') or '.png'
         arc = f'media/image{len(self._images)+1}{ext}'
         self._images.append((arc, path, rid))
-        keep = '<w:keepNext/>' if (caption or keep_next) else ''
-        drawing = (
-            f'<w:p><w:pPr>{keep}<w:jc w:val="center"/></w:pPr><w:r><w:drawing>'
+        n = len(self._images)
+        return (
+            f'<w:r><w:drawing>'
             f'<wp:inline distT="0" distB="0" distL="0" distR="0">'
-            f'<wp:extent cx="{cx}" cy="{cy}"/><wp:docPr id="{len(self._images)}" name="img{len(self._images)}"/>'
+            f'<wp:extent cx="{cx}" cy="{cy}"/><wp:docPr id="{n}" name="img{n}"/>'
             f'<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
-            f'<pic:pic><pic:nvPicPr><pic:cNvPr id="{len(self._images)}" name="img{len(self._images)}"/>'
+            f'<pic:pic><pic:nvPicPr><pic:cNvPr id="{n}" name="img{n}"/>'
             f'<pic:cNvPicPr/></pic:nvPicPr>'
             f'<pic:blipFill><a:blip r:embed="{rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
             f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
             f'<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>'
-            f'</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'
-        )
-        self._body.append(drawing)
+            f'</a:graphicData></a:graphic></wp:inline></w:drawing></w:r>')
+
+    def image(self, path, caption=None, max_w_emu=_MAX_W_EMU, keep_next=False, exact_w_emu=None):
+        keep = '<w:keepNext/>' if (caption or keep_next) else ''
+        run = self._drawing_run(path, max_w_emu, exact_w_emu)
+        self._body.append(f'<w:p><w:pPr>{keep}<w:jc w:val="center"/></w:pPr>{run}</w:p>')
         if caption:
             self.para([caption], align='center', bold=True, size=20, space_after=160)
 

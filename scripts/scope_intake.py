@@ -39,9 +39,10 @@ def value(s):
 
 def parse_keysight(path):
     txt = open(path, encoding='utf-8', errors='replace').read()
-    if 'ANALOG' not in txt or 'MEASUREMENTS' not in txt:
+    if 'ANALOG' not in txt:                       # a capture without automatic measurements is still a capture
         return None
-    info = {'channels': {}, 'meas': [], 'mode': 'YT', 'timebase': None, 'trigger': None}
+    info = {'channels': {}, 'meas': [], 'mode': 'YT', 'timebase': None, 'trigger': None,
+            'digital': 'DIGITAL' in txt}          # MSO logic channels D0–D15 in use
     for m in re.finditer(r'Ch (\d) Scale ([^,]+), Pos ([^,]+),', txt):
         info['channels'][int(m.group(1))] = {'scale': m.group(2).strip(), 'pos': value(m.group(3))}
     hz = re.search(r'HORIZONTAL\s*\n\s*Mode ([^,\n]+)(?:.*?Main Scale ([^,\n]+))?', txt)
@@ -51,8 +52,11 @@ def parse_keysight(path):
     tr = re.search(r'TRIGGER\s*\n.*\n\s*Mode ([^\n]+)', txt)
     if tr:
         info['trigger'] = tr.group(1).strip()
-    for m in re.finditer(r'^\+?\s*([A-Za-z\-]+)\((\d)\), Cur ([^,]+),', txt, re.M):   # "+ Duty(2)" = cursor-linked
-        info['meas'].append((m.group(1), int(m.group(2)), value(m.group(3)), m.group(3).strip()))
+    for m in re.finditer(r'^\+?\s*([A-Za-z\-]+)\((D?\d+)\), Cur ([^,]+),', txt, re.M):   # "+ Duty(2)", "Frequency(D3)"
+        ch = int(m.group(2)) if m.group(2).isdigit() else m.group(2)
+        info['meas'].append((m.group(1), ch, value(m.group(3)), m.group(3).strip()))
+    src = re.search(r'Source (D?\d+|Ch \d)', txt)
+    info['trigger_source'] = src.group(1) if src else None
     return info
 
 
@@ -79,6 +83,49 @@ def locked(info):
             if c1 != c2 and abs(f1 - f2) / max(f1, f2) < 1e-3:
                 same |= {c1, c2}
     return sorted(same)
+
+
+def _gen_freq(info):
+    """The generator frequency of a capture: Frequency(1) (CH1 = generator in the lab's convention)."""
+    for name, ch, v, raw in info['meas']:
+        if name == 'Frequency' and ch == 1 and v:
+            return v
+    return None
+
+
+def coverage(exp_dir, caps, supplies):
+    """Required captures (captures.json, written with the self-study document) against the captures
+    found. A capture that was never taken cost 3 points in validation (a triangle input in XY mode), and
+    it can be noticed only by counting: the settings file does not tell a sine from a triangle."""
+    path = os.path.join(exp_dir, 'captures.json')
+    if not os.path.exists(path):
+        return ['', '_אין captures.json – רשימת הצילומים הנדרשים נכתבת עם מסמך ההכנה העצמית; '
+                'בלעדיה אי אפשר לבדוק מה חסר._']
+    req = json.load(open(path, encoding='utf-8'))
+    groups = {}
+    for r in req:
+        key = (r.get('mode', 'YT'), r.get('freq_hz'))
+        groups.setdefault(key, []).append(r)
+    L = ['', '## צילומים נדרשים מול צילומים שנמצאו', '',
+         '| מצב | תדר מחולל | נדרשים | נמצאו | סעיפים | |', '|---|---|---|---|---|---|']
+    missing = 0
+    for (mode, f), rs in groups.items():
+        found = [n for n, info in caps if info['mode'] == mode and
+                 (f is None or (_gen_freq(info) and abs(_gen_freq(info) - f) / f < 0.05))]
+        flag = '⚠ חסרים צילומים' if len(found) < len(rs) else ''
+        missing += max(0, len(rs) - len(found))
+        fs = f'{f:g} Hz' if f else '–'
+        L.append(f'| {mode} | {fs} | {len(rs)} | {len(found)} | {", ".join(r["step"] for r in rs)} | {flag} |')
+    L += ['', '### מה חייב להופיע על המסך – לאשר לכל צילום', '',
+          '| סעיף | על המסך | מופיע בצילום? |', '|---|---|---|']
+    for r in req:
+        if r.get('measure') and r['measure'] != '–':
+            L.append(f'| {r["step"]} | {r["measure"]} | ☐ |')
+    L += ['', 'ערך שלא מופיע על המסך (סמן או מדידה אוטומטית) אינו מדידה: לא לחשב אותו מהתמונה ולהציג אותו '
+              'כ"נמדד". לספר למשתמש לפני הכתיבה.']
+    if missing:
+        print(f'  ⚠ {missing} required capture(s) not found – see INVENTORY.md')
+    return L
 
 
 def main(exp_dir, supplies):
@@ -110,12 +157,17 @@ def main(exp_dir, supplies):
         scales = ', '.join(f'CH{c} {v["scale"]}' for c, v in sorted(info['channels'].items()))
         if info['timebase']:
             scales += f', {info["timebase"]}'
+        if info.get('digital'):
+            scales += ', ערוצים דיגיטליים'
+        if info.get('trigger_source'):
+            scales += f', טריגר {info["trigger_source"]}'
         meas = ', '.join(f'{n}({c}) {raw}' for n, c, v, raw in info['meas'])
         fl = ['⚠ ' + f for f in flags_for(info, supplies)]
         lk = locked(info)
         if lk:
             fl.append('אותו תדר ב־' + ', '.join(f'CH{c}' for c in lk))
         L.append(f'| {k} | {t:%H:%M:%S} | `{name}` | {info["mode"]} | {scales} | {meas} | {" · ".join(fl)} |')
+    L += coverage(exp_dir, [(name, info) for t, name, info, dup in rows if info and not dup], supplies)
     L += ['', 'לפני השיבוץ: לאשר עם המשתמש איזה צילום שייך לאיזה שלב, ולשאול על כל ⚠.',
           '"אותו תדר" רגיל במעגל שמונע מהמחולל (מוצא שער עוקב אחרי הכניסה). אבל אם הצילום הוא של מתנד '
           'שאמור לרוץ חופשי – המתנד ננעל על המחולל, וצריך לבדוק את החיבור לפני שמנתחים את התדר.']

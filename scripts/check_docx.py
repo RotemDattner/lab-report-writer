@@ -27,7 +27,14 @@ M = '{http://schemas.openxmlformats.org/officeDocument/2006/math}'
 FIRST_PERSON = ['מדדתי', 'מדדנו', 'בניתי', 'בנינו', 'חיברתי', 'חיברנו', 'ראיתי', 'ראינו',
                 'ביצעתי', 'ביצענו', 'הרכבתי', 'הרכבנו', 'קיבלתי', 'קיבלנו', 'השתמשתי',
                 'השתמשנו', 'הצגתי', 'הצגנו', 'חישבתי', 'חישבנו', 'אני', 'אנחנו', 'אנו',
-                'שלנו', 'שלי', 'נמדוד', 'נבנה את', 'הבחנתי', 'הבחנו', 'למדנו', 'למדתי']
+                'שלנו', 'שלי', 'נמדוד', 'נבנה את', 'הבחנתי', 'הבחנו', 'למדנו', 'למדתי',
+                'נתקלנו', 'נאלצנו', 'ציפינו', 'החלטנו', 'ניסינו', 'עשינו', 'גילינו', 'בדקנו', 'מצאנו',
+                'צילמנו', 'כיוונו', 'החלפנו', 'הוספנו', 'הגענו', 'שמנו', 'רצינו', 'הבנו', 'נתקלתי']
+HEB_PREFIX = set('ושכהבלמ')        # "שקיבלנו", "ונאלצנו": a first-person verb behind one or two prefix letters
+
+
+def first_person_word(w, fp):
+    return w == fp or (w.endswith(fp) and 0 < len(w) - len(fp) <= 2 and set(w[:len(w) - len(fp)]) <= HEB_PREFIX)
 RE_REL = re.compile(r'[A-Za-z][\w]*\s*[<>≤≥]\s*[A-Za-z(]|[A-Za-z]\w*\s+[−-]\s+[A-Za-z]\w*')
 
 
@@ -176,7 +183,7 @@ def check(path, req=None):
             clean = re.sub(r'\[\[.*?\]\]', '', t)
             words = re.findall(r'[א-ת"\']+', clean)
             for fp in FIRST_PERSON:
-                if (' ' in fp and fp in clean) or fp in words:
+                if (' ' in fp and fp in clean) or any(first_person_word(w, fp) for w in words):
                     E.append(f'גוף ראשון במסכם ("{fp}"): "{t[:60]}"')
         bare = (b['plain'].replace('‎', '').replace('‏', '').replace('⁠', '')
                 .replace(' ', ' '))           # undo what ltr_islands adds, then re-run it
@@ -187,6 +194,47 @@ def check(path, req=None):
         empties = empties + 1 if not t and not b['drawing'] else 0
         if empties == 3:
             Wn.append('שלוש פסקאות ריקות ברצף (קפיצת שורות מיותרת)')
+    # ---- lessons from a graded summary report: each of these cost points
+    PRE = []
+    if kind == 'summary':
+        txt = lambda el: ''.join(t.text or '' for t in el.iter(W + 't'))
+        heads = [(i, b['text']) for i, (k, b) in enumerate(blocks)
+                 if k == 'p' and b['bold'] and re.match(r'^\d\. ', b['text'])]
+        if not any('סיכום' in h for _, h in heads):
+            E.append('אין פרק "סיכום" – "6. סיכום ומסקנות": פסקת סיכום ואחריה המסקנות ("חסר סיכום" עלה 2 נקודות)')
+        for k, tbl in blocks:                                    # the signature cell of the declaration
+            if k != 'tbl':
+                continue
+            rows = tbl.findall(W + 'tr')
+            if len(rows) < 2:
+                continue
+            hdr = [txt(c) for c in rows[0].findall(W + 'tc')]
+            if any('חתימה' in h for h in hdr):
+                sig = rows[1].findall(W + 'tc')[[i for i, h in enumerate(hdr) if 'חתימה' in h][0]]
+                if sig.find('.//' + W + 'drawing') is None and not re.sub(r'[_\s]', '', txt(sig)):
+                    Wn.append('תא החתימה ריק – לחתום לפני ההגשה, או לשמור תמונת חתימה ב־course.json '
+                              '(students[i].signature) ("חסר חתימה" עלה נקודה)')
+        t3 = next((i for i, h in heads if h.startswith('3. ')), None)
+        t4 = next((i for i, h in heads if h.startswith('4. ')), None)
+        if t3 is not None and t4 is not None:
+            theory_caps = [b['text'] for k, b in blocks[t3:t4]
+                           if k == 'p' and b['center'] and re.match(r'^(איור|טבלה) \d+ – ', b['text'])]
+            if not any(re.search(r'טבלת (אמת|פעולה)|חלוקת (ה)?הדקים|מבנה|סמל|דיאגרמ', c) for c in theory_caps):
+                Wn.append('רקע תאורטי: אין איור של הרכיב (סמל / חלוקת הדקים / מבנה) וטבלת אמת או טבלת פעולה – '
+                          'נדרש לכל רכיב, גם לשער הבסיסי ("חסר איור של שער NAND וטבלת האמת שלו")')
+        for n, idx in caps['איור']:                              # scope pictures: traces named by channel
+            if 'סקופ' in blocks[idx][1]['text']:
+                after = ' '.join(b['text'] for k, b in blocks[idx + 1:idx + 4] if k == 'p')
+                if 'ערוץ' not in after:
+                    Wn.append(f'איור {n} (סקופ): אין שורת ערוצים מתחת לאיור ("ערוץ 1 – כניסה, ערוץ 2 – מוצא")')
+        for b in paras:
+            col = re.search(r'(צהוב|ירוק|כחול|אדום|סגול|ורוד|כתום)', b['text'])
+            if col and 'ערוץ' not in b['text']:
+                Wn.append(f'זיהוי עקום לפי צבע בלבד ("{col.group(1)}") – לכתוב "ערוץ N": "{b["text"][:60]}"')
+        PRE = ['כל צילום שהחוברת מבקשת קיים, במצב הנכון (XY/YT) ובכניסה הנכונה – לפי captures.json / '
+               'טבלת הצילומים במסמך ההכנה',
+               'כל ערך שמוצג כ"נמדד" מופיע על מסך הסקופ בצילום (סמנים או מדידה אוטומטית) – לא מחושב מהתמונה',
+               'החתימה בעמוד השער', 'מספר העמודים במגבלה (render_pages.py מתריע)']
     # ---- tables & page numbers
     for k, tbl in blocks:
         if k == 'tbl':
@@ -201,7 +249,8 @@ def check(path, req=None):
     head = (f'# בדיקה אוטומטית — {name}\n\nסוג: {kind} · איורים: {figs} · טבלאות: {tabs} · '
             f'נוסחאות ממוספרות: {len(eqs)} · **שגיאות: {len(E)} · אזהרות: {len(Wn)}**\n')
     sec = lambda title, xs: (f'\n## {title} ({len(xs)})\n' + '\n'.join(f'- {x}' for x in dict.fromkeys(xs))) if xs else ''
-    report = head + sec('❌ שגיאות', E) + sec('⚠ אזהרות', Wn) + sec('ℹ לידיעה / לאימות שלך', I) + '\n'
+    report = (head + sec('❌ שגיאות', E) + sec('⚠ אזהרות', Wn) + sec('ℹ לידיעה / לאימות שלך', I)
+              + (('\n## ☐ לפני הגשה – לבדוק ידנית\n' + '\n'.join(f'- [ ] {x}' for x in PRE)) if PRE else '') + '\n')
     return report, len(E)
 
 

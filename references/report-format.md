@@ -97,15 +97,28 @@ Authoritative source: `docs/הנחיות לדוח מסכם 2026.pdf`. **Third pe
 1. `מטרת הניסוי` — a few lines.
 2. `תקציר` — what was done and the main results (after the lab).
 3. `רקע תאורטי` — only what is *new* in this experiment: components, figures (each explained),
-   numbered equations, and the units table (`גדלים ויחידותיהם`).
+   numbered equations, and the units table (`גדלים ויחידותיהם`). **Every component gets its
+   symbol or pinout and its truth/function table**, the basic gate included
+   (`content['component']`). The grader took a point for "חסר איור של שער NAND וטבלת האמת שלו"
+   although the Schmitt behaviour was explained.
 4. `ציוד נדרש` — with component values.
 5. `מהלך הניסוי` — **one section 5.k per booklet "מהלך הניסוי" part**, and inside it the booklet's
    own steps (א, ב, …). Per section: circuit (booklet figure) + explanation, components table,
    equation references; per measuring step a **simulation picture and a scope picture** with a
    comparison sentence; per question step an answer; a theory/simulation/measured/error table;
    a discussion.
-6. `מסקנות` — written by the user (guiding questions provided as placeholders), or from the
+6. `סיכום ומסקנות` — first a summary paragraph: what was built and measured, and the main results
+   (`content['summary']`). "מסקנות" alone was marked "חסר סיכום" (−2). Then the numbered
+   conclusions: written by the user (guiding questions provided as placeholders), or from the
    user's points when they ask.
+
+Scope pictures in section 5: under each one, after the explanation, a line naming the channels,
+as in the 2026 guidelines' example: "ערוץ 1 – אות כניסה, ערוץ 2 – אות מוצא"
+(`r.figure(..., channels=[...])`). Don't name traces by colour alone. Every value called "נמדד" is
+visible on that picture: a cursor, a Meas readout, or a graticule count.
+
+The declaration table is signed. Use `course.json` `students[i].signature`, a picture file in the
+course folder; otherwise the student signs before submitting. `check_docx` warns on an empty cell.
 
 After the lab, follow the content policy in SKILL.md ("After the lab"):
 - one capture per measured step, plus a simulation only where it explains something;

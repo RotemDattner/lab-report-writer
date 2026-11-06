@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 scope_trace.py — read the traces back out of a scope screenshot (Keysight InfiniiVision 3000/4000 X,
-800×632 PNG), so a value the scope did not measure can still be read FROM the capture instead of
-being guessed: switching thresholds, a capacitor's peak, an XY loop rebuilt from a YT capture.
+800×632 PNG) to CHECK a capture: is the pulse longer than one input period, where does the output switch,
+does the time axis agree with the scope's own frequency reading.
+
+NOT A MEASUREMENT. A value computed here is not visible on the scope screen, and graders do not accept
+it: thresholds read this way instead of with cursors on the screen cost 16 points of 100 ("חסר מדידת Vp
+ו־Vn בתמונת הסקופ"; "איך ניתן לדעת מה הם מתחי הסף אם לא מדדתם אותם בסקופ?"). In a report, "measured"
+means a cursor or automatic-measurement readout that appears on the capture. Use this tool to check and
+to explain; if a required value is not on the screen, tell the user before writing anything.
 
     python scope_trace.py <capture.png> [--in 1] [--out 2] [--csv out.csv]
 

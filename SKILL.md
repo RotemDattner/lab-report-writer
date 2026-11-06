@@ -90,6 +90,11 @@ installing anything or fetching from the web. If the user has their own workflow
    `build_prep(r, answers)`, `build_study(r, content)`, `build_summary(r, content)`.
    Authoring rules in `references/word-generation.md` (inline `$LaTeX$`, `==highlight==`,
    `r.ref()` before every figure/table/equation, `r.calc()` for formula → substitution → result).
+   The self-study document must give `captures`: one row per capture the booklet asks for ("הצג",
+   "מדוד"). Each row holds the step; the mode (XY/YT); the input; the supply; what must be on the
+   screen before saving and with which tool (cursors on Vp/Vn, Meas Freq, Duty); and what a
+   correct capture looks like. That table is the student's in-lab defence against the three
+   costliest mistakes. It is also written to `captures.json` for the intake after the lab.
 5. **Check deterministically**: `python scripts/check_docx.py <doc> --req requirements/requirements.json`
    for each document. Fix every ERROR; address or justify every WARNING.
 6. **Render and look**: `python scripts/render_pages.py <scratch_dir> <docs…>` → PDF + two-page
@@ -122,12 +127,24 @@ rounds of fixes in validation. Work in this order:
    - anything that went wrong in the lab: a wrong connection, or a step that was skipped.
 2. **Fill `lab.json`** (`date_performed`, `date_submitted`, `scope_serial`, `measured`). The cover
    reads it, so no blank dates or serial are left.
-3. **Values the scope did not measure** (thresholds, a capacitor peak, an XY loop at a supply
-   where only YT was captured) are read from the trace with `scripts/scope_trace.py`. It takes
-   scales and offsets from the capture's `.txt` and reads about ±1 pixel. Say in the report that
-   the value was read from the graph, and how.
-4. Then write the summary under the content policy below, check it, render it, and see the page
-   count (`render_pages.py` warns over `max_pages_summary`).
+3. **Measured means on the screen.** The grader accepts only what is visible on the scope
+   screen: a cursor readout (X1/X2/Y1/Y2/ΔX/ΔY), an automatic measurement (Meas), or a value that
+   can be read straight off the graticule, such as counting periods across the screen. A value
+   computed afterwards from the picture is not a measurement. In validation, thresholds computed
+   from the trace instead of with cursors cost **16 points of 100**: "חסר מדידת Vp ו־Vn בתמונת
+   הסקופ"; "איך ניתן לדעת מה הם מתחי הסף אם לא מדדתם אותם בסקופ?".
+   - `INVENTORY.md` lists, for each required capture, what must be on the screen. Look at every
+     capture and tick it.
+   - If a required value is not on the screen, **tell the user before writing**. Don't fill the gap
+     from the picture.
+   - `scripts/scope_trace.py` is for checking and explaining only. For example: does the time axis
+     agree with the scope's frequency reading? Its numbers never go into the report as "נמדד".
+4. **Missing captures.** `INVENTORY.md` compares the captures found with `captures.json`, the
+   required captures that the self-study document wrote. A required capture that was never taken
+   cost 3 points ("חסר תמונת סקופ של אות כניסה משולש במצב XY"). Tell the user what is missing.
+5. Then write the summary under the content policy below, check it, render it, and see the page
+   count (`render_pages.py` warns over `max_pages_summary`). Finish with the "לפני הגשה" list that
+   `check_docx.py` prints. Copy it into `QA.md`, ticked.
 
 ### Content policy for the summary report
 
@@ -149,12 +166,28 @@ These rules came from the user's corrections of the first finished summary:
   never compares a prediction against a value that the setup forced, such as the generator's
   frequency on a locked oscillator. Name the two sides in the column header.
 - **Every anomaly gets one sentence of physics.** For example: "the capacitor passed Vp because
-  the output was held until the control sine rose". If a cursor readout (Y1/Y2 at the side of
-  a capture) was not part of the measurement, say so, so a reader does not take it for one.
+  the output was held until the control sine rose". If the cursors on a capture do not mark
+  the quantity, then the quantity was not measured on the screen. Tell the user. Don't write
+  "the cursor readouts were not part of the measurement": in validation that sentence drew the
+  grader's question "how do you know the thresholds if you did not measure them?".
 - **Wrong wiring or a capture taken in the wrong state.** Add a short neutral note: what
   happened, how it shows in the capture, and what was used instead. Never hide it.
 - **Few highlights.** Highlight only what the user must still decide. Values read from a
   capture are not highlighted; the text says how they were read.
+
+### From the grader (first graded summary: 70/100)
+
+Each rule here cost points. `check_docx.py` checks the ones that can be checked.
+
+| Rule | Lost | Checked by |
+|---|---|---|
+| Measured values appear on the screen (cursors / Meas), not computed from the picture | 16 | you, with the INVENTORY list |
+| In-lab sanity: compare each capture with "צילום תקין נראה כך" before going on. A wrong connection found after the lab can't be fixed | 6 | the self-study checklist |
+| Every capture the booklet asks for is there, in the right mode (XY/YT) and with the right input | 3 | `scope_intake.py` + `captures.json` |
+| Section "6. סיכום ומסקנות": a summary paragraph first, then the conclusions (`content['summary']`) | 2 | ERROR |
+| Theory shows every component: its symbol or pinout and its truth/function table, even the basic gate (`content['component']`) | 1 | WARN |
+| Traces are named by channel: a line "ערוץ 1 – …, ערוץ 2 – …" under every scope picture (`r.figure(..., channels=[...])`); never by colour alone | 1 | WARN |
+| The declaration is signed: `course.json` `students[i].signature` picture, or by hand before submitting | 1 | WARN |
 
 ## After the user edits a report in Word
 
@@ -200,11 +233,11 @@ Then render it. Record the round in `QA.md`.
 | `report_kit.py` | Report class (numbering, captions, figures/tables/equations, image slots, cover) + `build_prep` / `build_summary` / `build_study` |
 | `mathtex.py` | LaTeX subset → OMML |
 | `build_docx.py` | low-level docx writer (RTL, OMML, tables, images, page numbers) |
-| `check_docx.py` | deterministic document checks (ERROR/WARN/INFO) |
+| `check_docx.py` | deterministic document checks (ERROR/WARN/INFO); for a summary also the grader's rules (סיכום, signature, component + truth table, channel lines, colour-only naming) and a "לפני הגשה" list |
 | `render_pages.py` | docx → PDF → two-page PNG spreads for page review (works on files open in Word) |
 | `visual_order.py` | prints PDF lines in true on-screen order — objective bidi check |
-| `scope_intake.py` | after the lab: inventory of the scope captures from their settings files, flags (wrong supply, locked oscillator, duplicates), `lab.json` draft |
-| `scope_trace.py` | reads the traces out of a Keysight capture (volts per column) → thresholds at output transitions, CSV |
+| `scope_intake.py` | after the lab: inventory of the scope captures from their settings files, flags (wrong supply, locked oscillator, duplicates), required captures vs found (`captures.json`), what must be on the screen, `lab.json` draft |
+| `scope_trace.py` | reads the traces out of a Keysight capture – for checking and explaining only; its values are not measurements and never go into a report as "נמדד" |
 | `docx_edit.py` | edits a report the user already changed in Word: `dump`, find/replace in runs, cells, renumber, comments, picture width; backup first |
 | `progress.py` | regenerates `מדד התקדמות.md` |
 | `selftest.py` | environment check + end-to-end test document |

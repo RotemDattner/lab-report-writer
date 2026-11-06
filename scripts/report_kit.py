@@ -49,6 +49,12 @@ def load_course(course_dir):
             if os.path.exists(os.path.join(base, cfg['logo'])):
                 cfg['logo'] = os.path.join(base, cfg['logo'])
                 break
+    # each student may have "signature": "<picture in the course folder>" – it goes into the declaration
+    # table of the summary (an unsigned summary cost a point in validation)
+    for s in cfg['students']:
+        sig = s.get('signature')
+        if sig and not os.path.isabs(sig):
+            s['signature'] = os.path.join(course_dir, sig)
     return cfg
 
 def load_lab(exp_dir):
@@ -207,9 +213,16 @@ class Report:
         self.b.para(_content([text]), align='center', italic=True, size=20, color=CAP_COLOR,
                     space_after=100, keep_next=keep_next)
 
-    def figure(self, key, path, caption, explain=None, width_cm=None):
+    def figure(self, key, path, caption, explain=None, width_cm=None, channels=None):
         """Picture + caption below + one-line explanation (required by the 2026 guidelines).
-        If the file is missing, a placeholder names exactly where to save it."""
+        If the file is missing, a placeholder names exactly where to save it.
+        channels: for a scope capture, what each channel shows, e.g. ['כניסה (מחולל)', 'מוצא'] or
+        {1: 'כניסה', 3: 'מוצא'}; printed as 'ערוץ 1 – כניסה' lines under the picture, as in the 2026
+        guidelines' example. Traces are named by channel, never by colour alone (a grader is colour-blind;
+        colour-only naming cost a point)."""
+        is_scope = 'scope' in os.path.basename(path or '').lower()
+        if is_scope and not channels:
+            print(f'  ⚠ fig:{key}: scope capture without channels=… – add "ערוץ N – …" lines')
         n = self.num('fig:' + key)
         rel = os.path.relpath(path, self.exp_dir).replace('\\', '/') if path else ''
         present = bool(path) and os.path.exists(path)
@@ -228,6 +241,13 @@ class Report:
         self._caption(f'איור {n} – {caption}')
         if explain:
             self.p(explain, size=22)
+        if channels:
+            if isinstance(channels, str):                # a ready line: 'ערוץ 1 – …; D0 עד D3 – …'
+                line = channels
+            else:
+                items = channels.items() if isinstance(channels, dict) else enumerate(channels, 1)
+                line = ', '.join(v if str(v).startswith('ערוץ') else f'ערוץ {k} – {v}' for k, v in items)
+            self.p(line.rstrip('.') + '.', size=22)
         return n
 
     def booklet_figure(self, key, caption_no=None, item=None, caption='', explain=None,
@@ -289,7 +309,12 @@ class Report:
                         'תמונות סקופ, טקסטים וכל רכיב אחר – שייכים להם בלבד. כל חריגה מהצהרה זו, '
                         'לרבות הגשת חומרים שאינם פרי עבודתם, תטופל בהליך משמעתי בפני ועדת משמעת '
                         'בחשד להעתקה.', size=22, space_after=200)
-            self.b.table([[lab.get('date_submitted') or blank, blank]], header=['תאריך', 'חתימה'])
+            sigs = [s['signature'] for s in c['students'] if s.get('signature') and os.path.exists(s['signature'])]
+            sig_cell = [x for p in sigs for x in (('img', p, 1080000), ' ')][:-1] if sigs else blank   # 3 cm each
+            if not sigs:
+                print('  ⚠ no signature picture (course.json: students[i].signature) – the summary must be '
+                      'signed before it is submitted')
+            self.b.table([[lab.get('date_submitted') or blank, sig_cell]], header=['תאריך', 'חתימה'])
         self.b.page_break()
 
     # ---- save ----------------------------------------------------------------------
@@ -434,7 +459,8 @@ def default_section(r, sec, it):
             r.figure(ks[4:], os.path.join(r.exp_dir, slot_name(sec, s['letter'], 'sim')),
                      'תוצאת הסימולציה (Multisim)', '[[ מה רואים בסימולציה ]]')
             r.figure(kc[4:], os.path.join(r.exp_dir, slot_name(sec, s['letter'], 'scope')),
-                     'צילום סקופ מהמעבדה', '[[ האם התוצאה המעשית תואמת את הסימולציה? הסבר ]]')
+                     'צילום סקופ מהמעבדה', '[[ האם התוצאה המעשית תואמת את הסימולציה? הסבר ]]',
+                     channels=['[[ מה בערוץ 1 ]]', '[[ מה בערוץ 2 ]]'])
         elif k == 'question':
             r.todo('תשובה')
         else:
@@ -445,9 +471,12 @@ def default_section(r, sec, it):
     r.todo('דיון בתוצאות: התאמה לתאוריה ולסימולציה, ומקורות שגיאה')
 
 def build_summary(r, content):
-    """content keys (all optional): goal, abstract, theory (callable), equipment (list),
+    """content keys (all optional): goal, abstract, theory (callable), component (callable: for EVERY
+    component of the experiment its symbol or pinout and its truth/function table – the grader deducts
+    when the basic gate is missing even if its special behaviour is explained), equipment (list),
     titles {k: section title}, sections {k: callable(r, sec, item)}, conclusions_guide (list),
-    conclusions (callable/list, after the lab - replaces the guide)."""
+    summary (callable/str: a closing paragraph – what was done and what came out), conclusions
+    (callable/list, after the lab - replaces the guide)."""
     req = r.req
     r.cover('דוח מסכם', declaration=True)
     r.h1('1. מטרת הניסוי')
@@ -455,6 +484,8 @@ def build_summary(r, content):
     r.h1('2. תקציר')
     _render(r, content.get('abstract') or (lambda r: r.todo('תקציר בגוף שלישי — יושלם אחרי המדידות')))
     r.h1('3. רקע תאורטי')
+    _render(r, content.get('component') or (lambda r: r.todo(
+        'לכל רכיב בניסוי: סמל או חלוקת הדקים, וטבלת אמת או טבלת פעולה (גם לשער הבסיסי)')))
     _render(r, content.get('theory') or (lambda r: r.todo('רקע תאורטי')))
     r.p(f"הגדלים והיחידות שבהם נעשה שימוש בדוח מרוכזים ב{r.ref('tab:units')}.")
     r.table('units', [[q, u] for q, u in UNITS], ['גודל', 'יחידות'], 'גדלים ויחידותיהם',
@@ -474,7 +505,10 @@ def build_summary(r, content):
         r.h2(f'{sec} {title}')
         fn = content.get('sections', {}).get(it['num'])
         (fn or default_section)(r, sec, it)
-    r.h1('6. מסקנות')
+    r.h1('6. סיכום ומסקנות')
+    # a closing summary paragraph first – "מסקנות" alone was marked "חסר סיכום"
+    _render(r, content.get('summary') or (lambda r: r.todo(
+        'סיכום: פסקה – מה נבנה ונמדד בניסוי, ומה התוצאות העיקריות')))
     if content.get('conclusions'):          # written after the lab (from the measurements)
         _render(r, content['conclusions'])
     else:
@@ -487,10 +521,36 @@ def build_summary(r, content):
         r.p(f'{i}. {clean_bib(b)}')
 
 # ---------------------------------------------------------------- self-study document
+# Rules every lab follows. They come from graded reports: thresholds computed afterwards from the picture
+# instead of cursors on the screen cost 16 points of 100; a missing XY capture 3; a wrong connection
+# noticed only after the lab 6.
+LAB_RULES = [
+    'מדידה = מה שמופיע על מסך הסקופ. לפני שמירת צילום, כל ערך שצריך למדוד מוצג עליו: בסמנים (Cursors) '
+    'שמונחים על הנקודה הנכונה, או במדידה אוטומטית (Meas). ערך שמחושב אחר כך מהתמונה לא נחשב מדידה.',
+    'כל צילום נשמר יחד עם קובץ ההגדרות של הסקופ (txt), ונרשם לאיזה סעיף הוא שייך.',
+    'לפני שממשיכים לסעיף הבא: משווים את הצילום לעמודה "צילום תקין נראה כך". אם הוא שונה – עוצרים ובודקים '
+    'את החיבורים עכשיו, כי אחרי המעבדה כבר אי אפשר לתקן.',
+    'לפני החיבור לרכיב: לוודא על המסך שהמחולל נותן רק 0 עד VDD.',
+    'למדוד את הנגדים והקבלים במולטימטר לפני הבנייה ולרשום את הערכים.',
+]
+
+
+def _save_captures(exp_dir, caps):
+    """captures.json: the required captures, read by scope_intake.py after the lab to show what is missing."""
+    try:
+        json.dump(caps, open(os.path.join(exp_dir, 'captures.json'), 'w', encoding='utf-8'),
+                  ensure_ascii=False, indent=1)
+    except OSError:
+        pass
+
+
 def build_study(r, content):
     """Quiz-readiness document. content keys: minute, concepts [(term, expl)], component
     (callable), formulas [{key, latex, name, meaning, valid, units, example}], circuits
     [callable], demos [callable], pitfalls [str], checklist [str],
+    captures [{step, mode 'XY'|'YT', input, vdd, measure (what must be on the screen and with which
+    scope tool), expect (what a correct capture looks like), freq_hz?, vdd_v?}] – one per capture the
+    booklet asks for ("הצג", "מדוד"); also written to captures.json for scope_intake.py,
     quiz [{q, options?, answer, explain}], cheatsheet [(name, latex)]."""
     req = r.req
     n = iter(range(1, 50))
@@ -498,7 +558,8 @@ def build_study(r, content):
     # study document - an empty self-study document used to pass the checker silently
     REQUIRED = {'minute': 'הניסוי בדקה', 'concepts': 'טבלת מושגים', 'formulas': 'נוסחאות מפתח עם דוגמאות',
                 'circuits': 'מעגלי הניסוי עם תוצאות סימולציה', 'pitfalls': 'מלכודות נפוצות',
-                'checklist': "צ'קליסט למעבדה", 'quiz': 'בוחן לדוגמה עם פתרונות'}
+                'checklist': "צ'קליסט למעבדה", 'quiz': 'בוחן לדוגמה עם פתרונות',
+                'captures': 'טבלת הצילומים הנדרשים (סעיף, מצב XY/YT, כניסה, הזנה; מה לסמן על המסך; איך נראה צילום תקין)'}
     gap = lambda key: None if content.get(key) else r.todo(f'יש לכתוב: {REQUIRED[key]}')
     r.b.para(f"מסמך הכנה עצמית – ניסוי {req['number']}: {req['title']}", align='center',
              bold=True, size=36, space_after=120)
@@ -539,6 +600,20 @@ def build_study(r, content):
     r.h1(f'{next(n)}. מלכודות נפוצות')
     gap('pitfalls')
     r.bullets(content.get('pitfalls', []))
+    r.h1(f'{next(n)}. צילומים נדרשים ומה חייב להופיע על המסך')
+    gap('captures')
+    caps = content.get('captures', [])
+    if caps:
+        r.p(f"כל צילום שהחוברת מבקשת מרוכז ב{r.ref('tab:captures')}, עם מצב התצוגה, מה חייב להופיע על המסך "
+            'לפני השמירה, ואיך נראה צילום תקין.')
+        r.table('captures', [[c['step'], f"{c.get('mode', 'YT')}; {c.get('input', '')}; {c.get('vdd', '')}".strip('; '),
+                              c.get('measure', '–'), c.get('expect', '')] for c in caps],
+                ['סעיף', 'מה לצלם (מצב; כניסה; הזנה)', 'על המסך לפני השמירה', 'צילום תקין נראה כך'],
+                'הצילומים הנדרשים',
+                explain='צילום שחסר או ערך שלא מופיע על המסך מורידים נקודות, ואחרי המעבדה כבר אי אפשר להשלים אותם.')
+        _save_captures(r.exp_dir, caps)
+    r.p('כללי מדידה בסקופ:', bold=True, keep_next=True)
+    r.bullets(LAB_RULES)
     r.h1(f"{next(n)}. צ'קליסט למעבדה")
     gap('checklist')
     for c in content.get('checklist', []):
