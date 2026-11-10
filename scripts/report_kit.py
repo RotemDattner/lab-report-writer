@@ -135,6 +135,8 @@ class Report:
         self.count = {'fig': 0, 'tab': 0, 'eq': 0}
         self.numbers = {}
         self.slots = []          # image slots: {'file','label','present'}
+        self._toc_at = None      # index in the body where the table of contents goes (r.toc())
+        self._headings = []      # (text, level) of every h1/h2, in order
         self.missing = []        # answer keys with no content
 
     # ---- numbering -------------------------------------------------------------
@@ -174,10 +176,43 @@ class Report:
             self.b.para(['• '] + _content(parts), size=size, space_after=60)
 
     def h1(self, text, new_page=False):
+        self._headings.append((text, 1))
         self.b.heading(text, 1, new_page=new_page)
 
     def h2(self, text):
+        self._headings.append((text, 2))
         self.b.heading(text, 2)
+
+    def toc(self):
+        """Table of contents here (a Word TOC field), then a page break. The entries and their page numbers
+        are filled at save(): the document is rendered once with LibreOffice and the page of every heading is
+        read from the PDF bookmarks, which LibreOffice builds from the headings' outline levels."""
+        self._toc_at = len(self.b._body)
+        self.b._body.append('')                          # placeholder, replaced at save()
+        self.page_break()
+
+    def _fill_toc(self, path):
+        heads = [(t, l) for t, l in self._headings]
+        pages = {}
+        try:
+            import tempfile, subprocess, shutil
+            from labenv import find_soffice
+            import pymupdf
+            tmp = tempfile.mkdtemp(prefix='toc_')
+            self.b._body[self._toc_at] = ''.join(self.b.toc_block([(t, l, '') for t, l in heads]))
+            probe = os.path.join(tmp, 'toc.docx')
+            self.b.save(probe)
+            subprocess.run([find_soffice(), f'-env:UserInstallation=file:///{tmp.replace(os.sep, "/")}/lo',
+                            '--headless', '--convert-to', 'pdf', '--outdir', tmp, probe],
+                           capture_output=True, timeout=300)
+            clean = lambda s: re.sub('[‎‏⁠]', '', s).replace(' ', ' ').strip()
+            for level, title, page in pymupdf.open(os.path.join(tmp, 'toc.pdf')).get_toc():
+                pages.setdefault(clean(title), page)
+            shutil.rmtree(tmp, ignore_errors=True)
+        except Exception as e:                           # no LibreOffice: Word fills the numbers when it refreshes
+            print(f'  ⚠ table of contents without page numbers ({type(e).__name__}); Word updates them on open')
+        entries = [(t, l, pages.get(re.sub('[‎‏⁠]', '', t).strip(), '')) for t, l in heads]
+        self.b._body[self._toc_at] = ''.join(self.b.toc_block(entries))
 
     def h3(self, text):
         self.b.heading(text, 3)
@@ -332,6 +367,8 @@ class Report:
                   f'    Carry changes into the edited file with scripts/docx_edit.py (see SKILL.md, '
                   f'"after manual edits").')
             path = alt
+        if self._toc_at is not None:
+            self._fill_toc(path)
         try:
             self.b.save(path)
             print(f'  saved: {os.path.basename(path)}  (figs={self.count["fig"]} tabs={self.count["tab"]} '
@@ -475,10 +512,14 @@ def build_summary(r, content):
     component of the experiment its symbol or pinout and its truth/function table – the grader deducts
     when the basic gate is missing even if its special behaviour is explained), equipment (list),
     titles {k: section title}, sections {k: callable(r, sec, item)}, conclusions_guide (list),
+    units (bool, default True: the units table in the theory section), toc (bool: a table of contents
+    after the cover – required by the 2026 guidelines over 15 pages),
     summary (callable/str: a closing paragraph – what was done and what came out), conclusions
     (callable/list, after the lab - replaces the guide)."""
     req = r.req
     r.cover('דוח מסכם', declaration=True)
+    if content.get('toc'):                   # required by the guidelines over 15 pages; on request below that
+        r.toc()
     r.h1('1. מטרת הניסוי')
     _render(r, content.get('goal') or ' '.join(req.get('goals', [])))
     r.h1('2. תקציר')
@@ -487,9 +528,10 @@ def build_summary(r, content):
     _render(r, content.get('component') or (lambda r: r.todo(
         'לכל רכיב בניסוי: סמל או חלוקת הדקים, וטבלת אמת או טבלת פעולה (גם לשער הבסיסי)')))
     _render(r, content.get('theory') or (lambda r: r.todo('רקע תאורטי')))
-    r.p(f"הגדלים והיחידות שבהם נעשה שימוש בדוח מרוכזים ב{r.ref('tab:units')}.")
-    r.table('units', [[q, u] for q, u in UNITS], ['גודל', 'יחידות'], 'גדלים ויחידותיהם',
-            explain='היחידות לפי מערכת SI; קידומות העשרוניות משמשות בכל ערכי הרכיבים והמדידות בדוח.')
+    if content.get('units', True):          # the units table of the 2026 template; users may drop it
+        r.p(f"הגדלים והיחידות שבהם נעשה שימוש בדוח מרוכזים ב{r.ref('tab:units')}.")
+        r.table('units', [[q, u] for q, u in UNITS], ['גודל', 'יחידות'], 'גדלים ויחידותיהם',
+                explain='היחידות לפי מערכת SI; קידומות העשרוניות משמשות בכל ערכי הרכיבים והמדידות בדוח.')
     r.h1('4. ציוד נדרש')
     eq = content.get('equipment') or (['מטריצה', 'ספק כוח DC', 'מחולל אותות', 'סקופ + USB', 'רב־מודד'] +
                                       [f'רכיב {k}' for k in req.get('datasheets', {})] +

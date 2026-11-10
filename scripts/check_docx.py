@@ -214,8 +214,9 @@ def check(path, req=None):
                 if sig.find('.//' + W + 'drawing') is None and not re.sub(r'[_\s]', '', txt(sig)):
                     Wn.append('תא החתימה ריק – לחתום לפני ההגשה, או לשמור תמונת חתימה ב־course.json '
                               '(students[i].signature) ("חסר חתימה" עלה נקודה)')
-        t3 = next((i for i, h in heads if h.startswith('3. ')), None)
-        t4 = next((i for i, h in heads if h.startswith('4. ')), None)
+        # the last match: a table of contents (refreshed by Word, bold entries) repeats the headings first
+        t3 = next((i for i, h in reversed(heads) if h.startswith('3. ')), None)
+        t4 = next((i for i, h in reversed(heads) if h.startswith('4. ')), None)
         if t3 is not None and t4 is not None:
             theory_caps = [b['text'] for k, b in blocks[t3:t4]
                            if k == 'p' and b['center'] and re.match(r'^(איור|טבלה) \d+ – ', b['text'])]

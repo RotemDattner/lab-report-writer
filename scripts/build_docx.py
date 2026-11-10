@@ -190,7 +190,7 @@ class DocxBuilder:
 
     def para(self, content, align='right', bold=False, size=None, rtl=True,
              space_after=120, highlight=False, italic=False, color=None, keep_next=False,
-             space_before=0, page_break_before=False):
+             space_before=0, page_break_before=False, outline=None):
         # pPr children MUST follow schema order: keepNext, pageBreakBefore, bidi, spacing, jc.
         # For RTL, bidi alone yields right alignment (matches the official template), so we
         # emit jc only for non-right alignment to avoid renderer ambiguity.
@@ -202,9 +202,30 @@ class DocxBuilder:
               f'<w:spacing w:before="{space_before}" w:after="{space_after}"/>'
         if align != 'right':
             ppr += f'<w:jc w:val="{align}"/>'
+        if outline is not None:                          # outline level: Word's TOC and the PDF bookmarks use it
+            ppr += f'<w:outlineLvl w:val="{outline}"/>'
         runs = self._render_tokens(content, rtl=rtl, bold=bold, size=size, highlight=highlight,
                                    italic=italic, color=color)
         self._body.append(f'<w:p><w:pPr>{ppr}</w:pPr>{runs}</w:p>')
+
+    def toc_block(self, entries, title='תוכן עניינים'):
+        """A real Word TOC field (TOC \\o "1-2" \\u) whose cached result lists entries [(text, level, page)].
+        Not marked dirty: Word updating it on open wrote page 1 everywhere. The cached pages are already right; the user can refresh it by hand.
+        Returns the XML paragraphs; the caller places them."""
+        out = [f'<w:p><w:pPr><w:keepNext/><w:bidi/><w:spacing w:before="0" w:after="200"/><w:jc w:val="center"/></w:pPr>'
+               f'{self._render_tokens(title, bold=True, size=30)}</w:p>']
+        fld_begin = ('<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+                     '<w:r><w:instrText xml:space="preserve"> TOC \\o "1-2" \\h \\z \\u </w:instrText></w:r>'
+                     '<w:r><w:fldChar w:fldCharType="separate"/></w:r>')
+        fld_end = '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+        if not entries:
+            entries = [('', 1, '')]
+        for k, (text, level, page) in enumerate(entries):
+            runs = (self._render_tokens(text) + '<w:r><w:rPr><w:rtl/></w:rPr><w:tab/></w:r>'
+                    + self._render_tokens(str(page)))
+            out.append(f'<w:p><w:pPr><w:pStyle w:val="TOC{min(level, 2)}"/><w:bidi/></w:pPr>'
+                       f'{fld_begin if k == 0 else ""}{runs}{fld_end if k == len(entries) - 1 else ""}</w:p>')
+        return out
 
     def title(self, text):
         self.para(text, align='center', bold=True, size=36, keep_next=True)
@@ -212,7 +233,8 @@ class DocxBuilder:
     def heading(self, text, level=1, new_page=False):
         size = {1: 30, 2: 26, 3: 24}.get(level, 24)
         self.para(text, align='right', bold=True, size=size, space_after=80,
-                  space_before=160 if level == 1 else 80, keep_next=True, page_break_before=new_page)
+                  space_before=160 if level == 1 else 80, keep_next=True, page_break_before=new_page,
+                  outline=level - 1 if level <= 3 else None)
 
     def question(self, number, text):
         """Numbered question heading: 'N. text' (kept exactly as the requirement numbers)."""
@@ -358,7 +380,16 @@ class DocxBuilder:
                 f'<w:rFonts w:ascii="{self._font}" w:hAnsi="{self._font}" w:cs="{self._font}"/>'
                 f'<w:sz w:val="{self._size}"/><w:szCs w:val="{self._size}"/></w:rPr></w:rPrDefault>'
                 '<w:pPrDefault><w:pPr><w:spacing w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault>'
-                '</w:docDefaults></w:styles>')
+                '</w:docDefaults>'
+                # TOC entry styles: right-to-left, dotted leader to the page number at the far (left) edge.
+                # Word uses these when it refreshes the TOC field, so the refreshed TOC keeps the same look.
+                '<w:style w:type="paragraph" w:styleId="TOC1"><w:name w:val="toc 1"/><w:pPr><w:bidi/>'
+                '<w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9020"/></w:tabs>'
+                '<w:spacing w:before="60" w:after="60"/></w:pPr><w:rPr><w:b/><w:bCs/></w:rPr></w:style>'
+                '<w:style w:type="paragraph" w:styleId="TOC2"><w:name w:val="toc 2"/><w:pPr><w:bidi/>'
+                '<w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9020"/></w:tabs>'
+                '<w:spacing w:before="0" w:after="40"/><w:ind w:right="360"/></w:pPr></w:style>'
+                '</w:styles>')
 
     def _content_types(self):
         return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
