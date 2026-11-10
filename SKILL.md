@@ -137,6 +137,18 @@ rounds of fixes in validation. Work in this order:
      capture and tick it.
    - If a required value is not on the screen, **tell the user before writing**. Don't fill the gap
      from the picture.
+   - **Numbers from the settings file, not from the picture.** Keysight saves a `.txt` next to every
+     capture (`3.png` → `3.txt`). Take every number it holds from there: channel scale and offset
+     (`Pos`), trigger source/slope/level, timebase, and the automatic measurements. Of each
+     measurement use only `Cur` — the value on the screen. `Mean`/`Min`/`Max` accumulate over the
+     whole lab session and keep channels that are no longer connected ("Cur No signal"); in
+     validation a capture showed `Frequency(2) Cur 500.01Hz` with `Mean 797.85Hz`.
+   - The `.txt` has **no cursor readouts** (X1/X2/ΔX, Y1/Y2/ΔY) and no waveform samples. Read those
+     from the picture only: zoom on the Cursor panel for the readouts, and look at the trace only
+     for its shape (counting bounces, which edge crosses a cursor). Cursors are tied to one source
+     channel: when they sit on another channel's trace, only ΔX/ΔY carry over (same V/div), not the
+     absolute Y1/Y2 — work that out from the two channels' `Pos` in the `.txt`.
+   - In notes and QA, say which source each value came from (`.txt` or picture).
    - `scripts/scope_trace.py` is for checking and explaining only. For example: does the time axis
      agree with the scope's frequency reading? Its numbers never go into the report as "נמדד".
 4. **Missing captures.** `INVENTORY.md` compares the captures found with `captures.json`, the
